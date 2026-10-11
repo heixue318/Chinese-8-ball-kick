@@ -154,86 +154,80 @@ public class MainActivity extends Activity {
         pendingInstallUri = null;
     }
 
+    void showSettings() {
+        new AlertDialog.Builder(this).setTitle("设置")
+                .setItems(new String[]{"使用帮助", "检查更新"}, (dialog, which) -> {
+                    if (which == 0) showHelp();
+                    else checkForUpdates();
+                }).setNegativeButton("关闭", null).show();
+    }
+
+    private void showHelp() {
+        new AlertDialog.Builder(this).setTitle("练习帮助")
+                .setMessage("• 拖动球台上的母球和目标球摆球；轻点目标球可选中。\n\n• 在底部白球上拖动红点，设置母球击点。\n\n• 拖动角度和力度滑杆，点击“击球”预览效果。\n\n• AR 识别功能仍在开发中。")
+                .setPositiveButton("知道了", null).show();
+    }
+
     static class Ball { float x,y; int color; String label; Ball(float x,float y,int c,String l){this.x=x;this.y=y;color=c;label=l;} }
 
     static class TableView extends View {
-        final Paint p = new Paint(3);
-        final ArrayList<Ball> balls = new ArrayList<>();
-        int selected=1, spin=4; float angle=0, power=.52f;
-        boolean ar=false, dragging=false, powerDragging=false;
-        float W,H,tx,ty,tw,th, panelX,panelY,panelW,panelH, scale, downX,downY;
-        RectF strike=new RectF(), reset=new RectF(), modeFree=new RectF(), modeAr=new RectF(), updateButton=new RectF(), angleMinus=new RectF(), anglePlus=new RectF(), powerMinus=new RectF(), powerPlus=new RectF();
-        RectF[] spinCells = new RectF[9];
-        final int felt=Color.rgb(16,112,82), gold=Color.rgb(219,174,94), ivory=Color.rgb(250,244,223), dark=Color.rgb(18,26,24), white=Color.WHITE;
-        TableView(Activity a){super(a); setLayerType(View.LAYER_TYPE_SOFTWARE,null); initBalls(); for(int i=0;i<9;i++)spinCells[i]=new RectF();}
-        void initBalls(){balls.clear(); balls.add(new Ball(.27f,.52f,Color.rgb(247,243,224),"母"));
-            int[] c={0xffe4bc43,0xff3c8ccb,0xffd9534f,0xff7b58a6,0xffee8a38,0xff44966c,0xff9c4556,0xff171717};
-            String[] n={"1","2","3","4","5","6","7","8"};
-            float[][] pos={{.70f,.50f},{.73f,.46f},{.73f,.54f},{.76f,.42f},{.76f,.50f},{.76f,.58f},{.79f,.46f},{.79f,.54f}};
-            for(int i=0;i<8;i++)balls.add(new Ball(pos[i][0],pos[i][1],c[i],n[i])); selected=1; invalidate(); }
-        @Override protected void onDraw(Canvas c){super.onDraw(c); W=getWidth();H=getHeight(); c.drawColor(dark);
-            boolean landscape=W>H; float pad=Math.min(W,H)*.035f; float header=Math.max(54,Math.min(W,H)*.105f);
-            text(c,"中八解球",pad,header*.64f,header*.42f,ivory,true); text(c,ar?"AR 识别待接入":"自由练习",pad,header*.92f,Math.max(11,header*.20f),0xff9dada7,false);
-            modeFree.set(W-pad-245,header*.20f,W-pad-163,header*.78f); modeAr.set(W-pad-155,header*.20f,W-pad-93,header*.78f); updateButton.set(W-pad-85,header*.20f,W-pad,header*.78f);
-            button(c,modeFree,"练习",!ar); button(c,modeAr,"AR",ar); button(c,updateButton,"更新",false);
-            if(landscape){ panelW=Math.max(205,Math.min(275,W*.29f)); panelX=W-pad-panelW; panelY=header+pad; panelH=H-header-2*pad;
-                tx=pad; ty=header+pad+14; tw=panelX-tx-pad; th=Math.min(panelH,tw*.53f); ty+=(panelH-th)*.5f;
-            } else { panelX=pad; panelY=header+pad; panelW=W-2*pad; panelH=H-panelY-pad; tx=pad; tw=W-2*pad; th=Math.min(H*.38f,tw*.53f); ty=panelY+Math.max(0,(panelH-th)*.22f); }
-            drawTable(c); drawPanel(c,landscape);
+        final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+        final ArrayList<Ball> balls=new ArrayList<>();
+        final int felt=0xff176f4b, rail=0xff5a3824, gold=0xffffc86f, ivory=0xfff7f2e2, dark=0xff111916;
+        int selected=1; float spinX=0,spinY=0,angle=0,power=.55f;
+        float W,H,s,tx,ty,tw,th,barY,barH,ballCX,ballCY,ballR,angleL,angleR,powerL,powerR;
+        boolean ar=false,ballDrag=false,angleDrag=false,powerDrag=false,spinDrag=false;
+        RectF modeFree=new RectF(),modeAr=new RectF(),settings=new RectF(),strike=new RectF(),reset=new RectF(),spinZone=new RectF();
+        TableView(Activity a){super(a);setLayerType(View.LAYER_TYPE_SOFTWARE,null);initBalls();}
+        void initBalls(){balls.clear();balls.add(new Ball(.26f,.52f,0xfff8f5e9,"母"));int[] colors={0xffe8bd38,0xff3987ca,0xffd74e48,0xff7952a1,0xffe68a36,0xff3c9765,0xff9a4656,0xff171717};String[] labels={"1","2","3","4","5","6","7","8"};float[][] pos={{.69f,.50f},{.73f,.45f},{.73f,.55f},{.77f,.40f},{.77f,.50f},{.77f,.60f},{.81f,.45f},{.81f,.55f}};for(int i=0;i<8;i++)balls.add(new Ball(pos[i][0],pos[i][1],colors[i],labels[i]));selected=1;invalidate();}
+
+        @Override protected void onDraw(Canvas c){super.onDraw(c);W=getWidth();H=getHeight();s=Math.max(.68f,Math.min(W/900f,H/400f));c.drawColor(dark);
+            float header=43*s;barH=108*s;barY=H-barH;
+            p.setColor(0xff18231e);c.drawRect(0,0,W,header,p);text(c,"中八解球",18*s,28*s,20*s,ivory,true);
+            modeFree.set(W-210*s,7*s,W-143*s,38*s);modeAr.set(W-135*s,7*s,W-78*s,38*s);settings.set(W-69*s,7*s,W-12*s,38*s);
+            button(c,modeFree,"自由练习",!ar,s);button(c,modeAr,"AR 解球",ar,s);button(c,settings,"设置",false,s);
+            float availableH=barY-header-14*s;th=Math.max(90*s,Math.min(availableH,(W-40*s)/2.05f));tw=th*2.05f;tx=(W-tw)*.5f;ty=header+(availableH-th)*.5f;
+            drawTable(c);drawControls(c,s);
         }
-        void drawTable(Canvas c){float rail=Math.max(10,Math.min(tw,th)*.045f); p.setColor(0xff503827); c.drawRoundRect(tx-rail,ty-rail,tx+tw+rail,ty+th+rail,rail*.6f,rail*.6f,p);
-            p.setColor(felt); c.drawRect(tx,ty,tx+tw,ty+th,p); p.setColor(0xffb4d6bb);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(1.2f);c.drawRect(tx,ty,tx+tw,ty+th,p);p.setStyle(Paint.Style.FILL);
-            float r=Math.max(5,Math.min(tw,th)*.025f); float[][] pockets={{tx,ty},{tx+tw/2,ty},{tx+tw,ty},{tx,ty+th},{tx+tw/2,ty+th},{tx+tw,ty+th}};
-            for(float[] q:pockets){p.setColor(0xff0b0d0c);c.drawCircle(q[0],q[1],r*1.45f,p);}
-            Ball cue=balls.get(0), target=balls.get(Math.min(selected,balls.size()-1)); float cx=tx+cue.x*tw,cy=ty+cue.y*th, ox=tx+target.x*tw,oy=ty+target.y*th;
-            float dx=ox-cx,dy=oy-cy,len=(float)Math.hypot(dx,dy); if(len>0){dx/=len;dy/=len; float br=Math.max(5,Math.min(tw,th)*.022f);
-                dashed(c,cx,cy,ox-dx*br*1.7f,oy-dy*br*1.7f,0xfff7e9b0,br*.18f);
-                float endX=ox+dx*tw*.33f,endY=oy+dy*tw*.33f; float[] hit=rayLimit(ox,oy,dx,dy,br);
-                if(hit!=null){endX=hit[0];endY=hit[1];}
-                dashed(c,ox+dx*br*1.7f,oy+dy*br*1.7f,endX,endY,0xffffd278,br*.18f);
-            }
-            for(int i=0;i<balls.size();i++){Ball b=balls.get(i); float x=tx+b.x*tw,y=ty+b.y*th, br=Math.max(6,Math.min(tw,th)*.025f);
-                p.setColor(0x55000000);c.drawCircle(x+br*.15f,y+br*.18f,br,p);p.setColor(b.color);c.drawCircle(x,y,br,p);
-                if(i==selected){p.setColor(gold);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(2);c.drawCircle(x,y,br+3,p);p.setStyle(Paint.Style.FILL);}
-                if(i==0){p.setColor(0xff746f62);p.setTextAlign(Paint.Align.CENTER);p.setTextSize(br*.78f);c.drawText("●",x,y+br*.28f,p);} else {p.setColor(i==8?white:0xff17211d);p.setTextAlign(Paint.Align.CENTER);p.setTextSize(br*.8f);c.drawText(b.label,x,y+br*.28f,p);}
-            }
-            if(ar){p.setColor(0xd9121a18);c.drawRoundRect(tx+tw*.15f,ty+th*.31f,tx+tw*.85f,ty+th*.69f,16,16,p);textCentered(c,"AR 相机识别尚未接入",tx+tw*.5f,ty+th*.46f,Math.max(14,Math.min(19,tw*.038f)),ivory,true);textCentered(c,"当前版本可使用自由练习摆球",tx+tw*.5f,ty+th*.57f,Math.max(11,Math.min(14,tw*.027f)),0xffb4c3bc,false);}
-            p.setTextAlign(Paint.Align.LEFT); text(c,"虚线：母球路线   金线：目标球路线",tx,ty+th+rail+20,12,0xffb4c3bc,false);
+
+        void drawTable(Canvas c){float r=Math.max(7*s,Math.min(tw,th)*.042f);p.setColor(0xff251b15);c.drawRoundRect(tx-r*1.45f,ty-r*1.45f,tx+tw+r*1.45f,ty+th+r*1.45f,r,r,p);p.setColor(rail);c.drawRoundRect(tx-r,ty-r,tx+tw+r,ty+th+r,r,r,p);p.setColor(felt);c.drawRect(tx,ty,tx+tw,ty+th,p);
+            float pocket=Math.max(7*s,th*.035f);p.setColor(0xff090e0c);float[][] holes={{tx,ty},{tx+tw/2,ty},{tx+tw,ty},{tx,ty+th},{tx+tw/2,ty+th},{tx+tw,ty+th}};for(float[] q:holes)c.drawCircle(q[0],q[1],pocket,p);
+            Ball cue=balls.get(0),target=balls.get(Math.min(selected,balls.size()-1));float cx=tx+cue.x*tw,cy=ty+cue.y*th,ox=tx+target.x*tw,oy=ty+target.y*th,dx=ox-cx,dy=oy-cy,len=(float)Math.hypot(dx,dy);
+            if(len>0){dx/=len;dy/=len;float br=th*.025f;dashed(c,cx,cy,ox-dx*br*1.8f,oy-dy*br*1.8f,0xfff8e9b2,2*s);float[] end=rayLimit(ox,oy,dx,dy,br);dashed(c,ox+dx*br*1.8f,oy+dy*br*1.8f,end[0],end[1],gold,2*s);}
+            for(int i=0;i<balls.size();i++){Ball b=balls.get(i);float x=tx+b.x*tw,y=ty+b.y*th,br=th*.033f;p.setColor(0x55000000);c.drawCircle(x+br*.12f,y+br*.15f,br,p);p.setColor(b.color);c.drawCircle(x,y,br,p);if(i==selected){p.setColor(gold);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(2*s);c.drawCircle(x,y,br+4*s,p);p.setStyle(Paint.Style.FILL);}p.setColor(i==8?ivory:0xff17221c);p.setTextSize(br*.8f);p.setTextAlign(Paint.Align.CENTER);p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);c.drawText(b.label,x,y+br*.28f,p);}
+            if(ar){p.setColor(0xd6111916);c.drawRoundRect(tx+tw*.28f,ty+th*.35f,tx+tw*.72f,ty+th*.65f,12*s,12*s,p);textCentered(c,"AR 球台识别待接入",tx+tw/2,ty+th*.47f,16*s,ivory,true);textCentered(c,"当前可使用自由练习",tx+tw/2,ty+th*.57f,12*s,0xffc2d0c8,false);}
+            p.setTextAlign(Paint.Align.LEFT);
         }
-        float[] rayLimit(float x,float y,float dx,float dy,float margin){float best=Float.POSITIVE_INFINITY, bx=0,by=0; float[] xs={tx+margin,tx+tw-margin},ys={ty+margin,ty+th-margin};
-            if(dx>0){float t=(xs[1]-x)/dx;if(t>0&&t<best){best=t;bx=xs[1];by=y+dy*t;}} else if(dx<0){float t=(xs[0]-x)/dx;if(t>0&&t<best){best=t;bx=xs[0];by=y+dy*t;}}
-            if(dy>0){float t=(ys[1]-y)/dy;if(t>0&&t<best){best=t;bx=x+dx*t;by=ys[1];}} else if(dy<0){float t=(ys[0]-y)/dy;if(t>0&&t<best){best=t;bx=x+dx*t;by=ys[0];}}
-            return best<Float.POSITIVE_INFINITY?new float[]{bx,by}:null; }
-        void dashed(Canvas c,float x1,float y1,float x2,float y2,int color,float width){float d=(float)Math.hypot(x2-x1,y2-y1);int n=Math.max(1,(int)(d/10));p.setColor(color);p.setStrokeWidth(width);for(int i=0;i<n;i+=2){float a=i/(float)n,b=Math.min(1,(i+1)/(float)n);c.drawLine(x1+(x2-x1)*a,y1+(y2-y1)*a,x1+(x2-x1)*b,y1+(y2-y1)*b,p);}}
-        void drawPanel(Canvas c,boolean landscape){float gap=10; float x=panelX,y=panelY,w=panelW; p.setColor(0xff202b27);c.drawRoundRect(x,y,x+w,y+panelH,20,20,p);
-            float fs=Math.max(12,Math.min(16,w*.065f)); float top=y+18;
-            text(c,"母球击点",x+16,top+fs,fs,ivory,true); float cell=Math.min(34,w*.14f), gx=x+w*.52f, gy=top+fs+13;
-            for(int i=0;i<9;i++){int row=i/3,col=i%3;RectF r=new RectF(gx+(cell+5)*col,gy+(cell+5)*row,gx+(cell+5)*col+cell,gy+(cell+5)*row+cell);spinCells[i].set(r);p.setColor(spin==i?0xff4a806a:0xff33433c);c.drawRoundRect(r,7,7,p);p.setColor(0xffeae7d9);c.drawCircle(r.centerX(),r.centerY(),3,p);if(spin==i){p.setColor(gold);c.drawCircle(r.centerX(),r.centerY(),6,p);}}
-            float cy=gy+3*(cell+5)+12; text(c,"球杆角度",x+16,cy+fs,fs,ivory,true); angleMinus.set(x+w-88,cy,x+w-54,cy+30);anglePlus.set(x+w-42,cy,x+w-8,cy+30);smallButton(c,angleMinus,"−");smallButton(c,anglePlus,"+"); text(c,Math.round(angle)+"°",x+w*.50f,cy+21,fs,gold,true);
-            cy+=50;text(c,"击球力度",x+16,cy+fs,fs,ivory,true);powerMinus.set(x+w-88,cy,x+w-54,cy+30);powerPlus.set(x+w-42,cy,x+w-8,cy+30);smallButton(c,powerMinus,"−");smallButton(c,powerPlus,"+");
-            float barX=x+16,barY=cy+fs+17,barW=w-32;p.setColor(0xff405149);c.drawRoundRect(barX,barY,barX+barW,barY+6,4,4,p);p.setColor(0xff68d3ad);c.drawRoundRect(barX,barY,barX+barW*power,barY+6,4,4,p);p.setColor(ivory);c.drawCircle(barX+barW*power,barY+3,8,p);
-            float buttonsY=y+panelH-54;strike.set(x+14,buttonsY,x+w-14,buttonsY+42);p.setColor(0xff54c89b);c.drawRoundRect(strike,12,12,p);textCentered(c,"击 球",strike.centerX(),strike.centerY()+fs*.34f,fs,dark,true);
-            reset.set(x+14,buttonsY-43,x+w-14,buttonsY-8);p.setColor(0xff33433c);c.drawRoundRect(reset,10,10,p);textCentered(c,"重置球型",reset.centerX(),reset.centerY()+5,12,ivory,false);
-            if(!landscape){text(c,"拖动母球或目标球摆球 · 点选目标球",x+14,buttonsY-65,11,0xffaebdb6,false);}
+        float[] rayLimit(float x,float y,float dx,float dy,float margin){float best=Float.POSITIVE_INFINITY,bx=x,by=y;float[] xs={tx+margin,tx+tw-margin},ys={ty+margin,ty+th-margin};if(dx>0){float t=(xs[1]-x)/dx;if(t>0&&t<best){best=t;bx=xs[1];by=y+dy*t;}}else if(dx<0){float t=(xs[0]-x)/dx;if(t>0&&t<best){best=t;bx=xs[0];by=y+dy*t;}}if(dy>0){float t=(ys[1]-y)/dy;if(t>0&&t<best){best=t;bx=x+dx*t;by=ys[1];}}else if(dy<0){float t=(ys[0]-y)/dy;if(t>0&&t<best){best=t;bx=x+dx*t;by=ys[0];}}return new float[]{bx,by};}
+        void dashed(Canvas c,float x1,float y1,float x2,float y2,int color,float width){float d=(float)Math.hypot(x2-x1,y2-y1);int n=Math.max(1,(int)(d/(7*s)));p.setColor(color);p.setStrokeWidth(width);for(int i=0;i<n;i+=2){float a=i/(float)n,b=Math.min(1,(i+1)/(float)n);c.drawLine(x1+(x2-x1)*a,y1+(y2-y1)*a,x1+(x2-x1)*b,y1+(y2-y1)*b,p);}}
+
+        void drawControls(Canvas c,float scale){p.setColor(0xff202a24);c.drawRoundRect(8*scale,barY+5*scale,W-8*scale,H+18*scale,16*scale,16*scale,p);
+            float cy=barY+55*scale;ballCX=68*scale;ballCY=cy;ballR=35*scale;spinZone.set(ballCX-ballR,cy-ballR,ballCX+ballR,cy+ballR);
+            text(c,"母球击点",22*scale,barY+19*scale,12*scale,ivory,true);p.setColor(0xfffaf8ed);c.drawCircle(ballCX,ballCY,ballR,p);p.setColor(0xffd9ddda);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(1.4f*scale);c.drawCircle(ballCX,ballCY,ballR,p);p.setStyle(Paint.Style.FILL);p.setColor(0xffd5232b);c.drawCircle(ballCX+spinX*ballR*.66f,ballCY+spinY*ballR*.66f,5*scale,p);
+            float labelY=barY+25*scale;angleL=135*scale;angleR=W*.43f;powerL=W*.48f;powerR=W-122*scale;
+            text(c,"球杆角度",angleL,labelY,12*scale,ivory,true);text(c,Math.round(angle)+"°",angleR-25*scale,labelY,12*scale,gold,true);drawSlider(c,angleL,angleL+10*scale,angleR,labelY+22*scale,angle/90f,scale);
+            text(c,"击球力度",powerL,labelY,12*scale,ivory,true);text(c,Math.round(power*100)+"%",powerR-36*scale,labelY,12*scale,gold,true);drawSlider(c,powerL,powerL+10*scale,powerR,labelY+22*scale,power,scale);
+            reset.set(powerR-2*scale,barY+68*scale,powerR+56*scale,barY+94*scale);smallButton(c,reset,"重置",scale);
+            strike.set(powerR+12*scale,barY+65*scale,W-18*scale,barY+96*scale);button(c,strike,"击 球",true,scale);
         }
-        void button(Canvas c,RectF r,String s,boolean active){p.setColor(active?0xff54c89b:0xff293631);c.drawRoundRect(r,16,16,p);textCentered(c,s,r.centerX(),r.centerY()+6,14,active?dark:ivory,true);}
-        void smallButton(Canvas c,RectF r,String s){p.setColor(0xff35453e);c.drawRoundRect(r,7,7,p);textCentered(c,s,r.centerX(),r.centerY()+6,18,ivory,true);}
-        void text(Canvas c,String s,float x,float y,float size,int color,boolean bold){p.setColor(color);p.setTypeface(bold?android.graphics.Typeface.create("sans-serif",1):android.graphics.Typeface.create("sans-serif",0));p.setTextSize(size);p.setTextAlign(Paint.Align.LEFT);c.drawText(s,x,y,p);}
-        void textCentered(Canvas c,String s,float x,float y,float size,int color,boolean bold){p.setColor(color);p.setTypeface(android.graphics.Typeface.create("sans-serif",bold?1:0));p.setTextSize(size);p.setTextAlign(Paint.Align.CENTER);c.drawText(s,x,y,p);p.setTextAlign(Paint.Align.LEFT);}
-        @Override public boolean onTouchEvent(MotionEvent e){float x=e.getX(),y=e.getY();
-            if(e.getAction()==MotionEvent.ACTION_DOWN){downX=x;downY=y; if(in(x,y,strike)||in(x,y,reset)||in(x,y,modeFree)||in(x,y,modeAr)||in(x,y,updateButton)||in(x,y,angleMinus)||in(x,y,anglePlus)||in(x,y,powerMinus)||in(x,y,powerPlus)){return true;}
-                if(x>=tx&&x<=tx+tw&&y>=ty&&y<=ty+th){int hit=-1;for(int i=0;i<balls.size();i++){Ball b=balls.get(i);float px=tx+b.x*tw,py=ty+b.y*th;if(Math.hypot(x-px,y-py)<Math.min(tw,th)*.055f)hit=i;}
-                    if(hit>=0){if(hit>0)selected=hit;dragging=true;} else {Ball b=balls.get(0);b.x=clamp((x-tx)/tw,.03f,.97f);b.y=clamp((y-ty)/th,.04f,.96f);} invalidate();return true;}
-                for(int i=0;i<9;i++)if(in(x,y,spinCells[i])){spin=i;invalidate();return true;}
-                if(y>panelY&&y<panelY+panelH&&x>=panelX){float barY=powerBarY();if(y>barY-12&&y<barY+20){power=clamp((x-(panelX+16))/(panelW-32),0,1);powerDragging=true;invalidate();return true;}}
-                return true;}
-            if(e.getAction()==MotionEvent.ACTION_MOVE&&powerDragging){power=clamp((x-(panelX+16))/(panelW-32),0,1);invalidate();return true;}
-            if(e.getAction()==MotionEvent.ACTION_MOVE&&dragging){Ball b=balls.get(selected);b.x=clamp((x-tx)/tw,.025f,.975f);b.y=clamp((y-ty)/th,.04f,.96f);invalidate();return true;}
-            if(e.getAction()==MotionEvent.ACTION_UP){if(powerDragging){powerDragging=false;return true;}if(dragging){dragging=false;return true;} if(in(x,y,modeFree)){ar=false;invalidate();return true;}if(in(x,y,modeAr)){ar=true;invalidate();return true;}if(in(x,y,updateButton)){((MainActivity)getContext()).checkForUpdates();return true;}if(in(x,y,angleMinus)){angle=Math.max(0,angle-5);invalidate();return true;}if(in(x,y,anglePlus)){angle=Math.min(90,angle+5);invalidate();return true;}if(in(x,y,powerMinus)){power=Math.max(0,power-.1f);invalidate();return true;}if(in(x,y,powerPlus)){power=Math.min(1,power+.1f);invalidate();return true;}if(in(x,y,reset)){initBalls();return true;}if(in(x,y,strike)){shoot();invalidate();return true;}return true;}return true;
+        void drawSlider(Canvas c,float left,float trackL,float right,float y,float value,float scale){p.setColor(0xff42534a);c.drawRoundRect(trackL,y-3*scale,right,y+3*scale,4*scale,4*scale,p);p.setColor(0xff68d2a5);c.drawRoundRect(trackL,y-3*scale,trackL+(right-trackL)*value,y+3*scale,4*scale,4*scale,p);p.setColor(0x6643544b);c.drawCircle(trackL+(right-trackL)*value,y,12*scale,p);p.setColor(ivory);c.drawCircle(trackL+(right-trackL)*value,y,8*scale,p);}
+        void button(Canvas c,RectF r,String label,boolean active,float scale){p.setColor(active?0xff69d5a8:0xff304038);c.drawRoundRect(r,10*scale,10*scale,p);textCentered(c,label,r.centerX(),r.centerY()+4*scale,11*scale,active?0xff12201a:ivory,true);}
+        void smallButton(Canvas c,RectF r,String label,float scale){p.setColor(0xff33433b);c.drawRoundRect(r,8*scale,8*scale,p);textCentered(c,label,r.centerX(),r.centerY()+4*scale,11*scale,ivory,false);}
+        void text(Canvas c,String v,float x,float y,float size,int color,boolean bold){p.setColor(color);p.setTypeface(android.graphics.Typeface.create("sans-serif",bold?1:0));p.setTextSize(size);p.setTextAlign(Paint.Align.LEFT);c.drawText(v,x,y,p);}
+        void textCentered(Canvas c,String v,float x,float y,float size,int color,boolean bold){p.setColor(color);p.setTypeface(android.graphics.Typeface.create("sans-serif",bold?1:0));p.setTextSize(size);p.setTextAlign(Paint.Align.CENTER);c.drawText(v,x,y,p);p.setTextAlign(Paint.Align.LEFT);}
+
+        @Override public boolean onTouchEvent(MotionEvent e){float x=e.getX(),y=e.getY();int action=e.getAction();
+            if(action==MotionEvent.ACTION_DOWN){if(in(x,y,settings)||in(x,y,modeFree)||in(x,y,modeAr)||in(x,y,strike)||in(x,y,reset))return true;
+                if(in(x,y,spinZone)){spinDrag=true;updateSpin(x,y);return true;}
+                float labelY=barY+25*s,trackY=labelY+22*s;if(y>trackY-20*s&&y<trackY+20*s&&x>angleL&&x<angleR){angleDrag=true;updateAngle(x);return true;}if(y>trackY-20*s&&y<trackY+20*s&&x>powerL&&x<powerR){powerDrag=true;updatePower(x);return true;}
+                if(x>=tx&&x<=tx+tw&&y>=ty&&y<=ty+th){int hit=-1;for(int i=0;i<balls.size();i++){Ball b=balls.get(i);if(Math.hypot(x-(tx+b.x*tw),y-(ty+b.y*th))<th*.055f)hit=i;}if(hit>=0){if(hit>0)selected=hit;ballDrag=true;}else{Ball b=balls.get(0);b.x=clamp((x-tx)/tw,.03f,.97f);b.y=clamp((y-ty)/th,.04f,.96f);}invalidate();return true;}return true;}
+            if(action==MotionEvent.ACTION_MOVE){if(spinDrag)updateSpin(x,y);if(angleDrag)updateAngle(x);if(powerDrag)updatePower(x);if(ballDrag){Ball b=balls.get(selected);b.x=clamp((x-tx)/tw,.025f,.975f);b.y=clamp((y-ty)/th,.04f,.96f);}invalidate();return true;}
+            if(action==MotionEvent.ACTION_UP){if(spinDrag){spinDrag=false;return true;}if(angleDrag){angleDrag=false;return true;}if(powerDrag){powerDrag=false;return true;}if(ballDrag){ballDrag=false;return true;}if(in(x,y,modeFree)){ar=false;invalidate();return true;}if(in(x,y,modeAr)){ar=true;invalidate();return true;}if(in(x,y,settings)){((MainActivity)getContext()).showSettings();return true;}if(in(x,y,reset)){initBalls();spinX=spinY=0;return true;}if(in(x,y,strike)){shoot();invalidate();return true;}return true;}return true;
         }
-        float powerBarY(){float fs=Math.max(12,Math.min(16,panelW*.065f)),cell=Math.min(34,panelW*.14f);return panelY+18+fs+13+3*(cell+5)+12+50+fs+17;}
-        void shoot(){Ball cue=balls.get(0),obj=balls.get(selected);float dx=obj.x-cue.x,dy=obj.y-cue.y,l=(float)Math.hypot(dx,dy);if(l<.001)return;dx/=l;dy/=l;float travel=Math.min(.45f,.08f+power*.5f);cue.x=clamp(obj.x-dx*.045f,.025f,.975f);cue.y=clamp(obj.y-dy*.045f,.04f,.96f);obj.x=clamp(obj.x+dx*travel,.025f,.975f);obj.y=clamp(obj.y+dy*travel,.04f,.96f);}
+        void updateSpin(float x,float y){spinX=clamp((x-ballCX)/(ballR*.66f),-1,1);spinY=clamp((y-ballCY)/(ballR*.66f),-1,1);invalidate();}
+        void updateAngle(float x){angle=clamp((x-(angleL+10*s))/(angleR-(angleL+10*s)),0,1)*90;invalidate();}
+        void updatePower(float x){power=clamp((x-(powerL+10*s))/(powerR-(powerL+10*s)),0,1);invalidate();}
+        void shoot(){Ball cue=balls.get(0),obj=balls.get(selected);float dx=obj.x-cue.x,dy=obj.y-cue.y,l=(float)Math.hypot(dx,dy);if(l<.001f)return;dx/=l;dy/=l;float travel=Math.min(.45f,.08f+power*.5f);cue.x=clamp(obj.x-dx*.045f+spinX*.012f,.025f,.975f);cue.y=clamp(obj.y-dy*.045f+spinY*.012f,.04f,.96f);obj.x=clamp(obj.x+dx*travel,.025f,.975f);obj.y=clamp(obj.y+dy*travel,.04f,.96f);}
         boolean in(float x,float y,RectF r){return r.contains(x,y);}float clamp(float v,float a,float b){return Math.max(a,Math.min(b,v));}
     }
 }
-
