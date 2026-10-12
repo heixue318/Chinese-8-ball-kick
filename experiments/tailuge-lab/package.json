@@ -1,0 +1,1 @@
+{"name":"chinese-eight-ball-physics-lab","private":true,"version":"0.1.0","type":"module","license":"GPL-3.0-only","scripts":{"build":"node build.mjs","test":"node build.mjs && node --test test/*.test.mjs","start":"node server.mjs","check":"tsc --noEmit"},"dependencies":{"three":"0.186.1"},"devDependencies":{"esbuild":"0.25.12","typescript":"5.9.3","@types/three":"0.183.1"}}

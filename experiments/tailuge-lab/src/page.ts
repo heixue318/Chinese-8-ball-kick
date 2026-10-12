@@ -1,0 +1,82 @@
+import { Simulator, simulateShot, analyzeShot, config, geometry, type BallSeed, type ShotSeed, type SimulationRun } from './simulator';
+import { zhongbaDrills, type PracticeDrill } from '../../../training-data/zhongba-drills';
+
+type Layout = { name: string; free?: boolean; balls: BallSeed[]; power: number; angle: number; side?: number; top?: number };
+const layouts: Record<string, Layout> = {
+  free: { name: '自由摆球', free: true, balls: [{ x: -.73, y: 0 }, { x: -.08, y: .05 }, { x: .45, y: -.18 }, { x: .66, y: .2 }], angle: 6, power: 1.8 },
+  open: { name: '进袋练习', balls: [{ x: -.78, y: -.29 }, { x: -.13, y: .04 }, { x: .52, y: .25 }], angle: 17, power: 1.55, top: .08 },
+  rail: { name: '一库解球', balls: [{ x: -.74, y: -.36 }, { x: .26, y: .18 }, { x: .66, y: -.2 }], angle: 26, power: 2.4, side: .18 },
+  break: { name: '小三角开球', balls: [{ x: -.85, y: 0 }, { x: .22, y: 0 }, { x: .28, y: .035 }, { x: .28, y: -.035 }, { x: .34, y: .07 }, { x: .34, y: 0 }, { x: .34, y: -.07 }], angle: 0, power: 3.7 },
+};
+const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const canvas = el<HTMLCanvasElement>('table'), ctx = canvas.getContext('2d')!;
+const layoutEl = el<HTMLSelectElement>('layout'), tip = el('tip'), tipDot = el('tipDot'), toast = el('toast');
+const drillSelect = el<HTMLSelectElement>('drillSelect');
+const powerControl = el('powerControl'), fineAim = el('fineAim');
+for (const [key, value] of Object.entries(layouts)) layoutEl.add(new Option(value.name, key));
+for (const drill of zhongbaDrills) drillSelect.add(new Option(`${drill.title} · ${'★'.repeat(drill.difficulty)}`, drill.id));
+let base: Layout = structuredClone(layouts.free), seed: ShotSeed, prediction: SimulationRun, sim: Simulator | undefined;
+let running = false, elapsed = 0, last = 0, draggingBall: number | undefined, aiming = false, showGuideline = true, elevation = 0, toastTimer = 0;
+let pocketed: number[] = [];
+let activeDrill: PracticeDrill | undefined;
+const scale = canvas.width / config.width, x = (value: number) => canvas.width / 2 + value * scale, y = (value: number) => canvas.height / 2 - value * scale;
+const fromCanvas = (event: PointerEvent) => { const rect = canvas.getBoundingClientRect(); return { x: (event.clientX - rect.left) * canvas.width / rect.width, y: (event.clientY - rect.top) * canvas.height / rect.height }; };
+const ballColors = ['#f8f6ec', '#e5bd2f', '#b9423c', '#3f9c66', '#7b5ac7', '#d4773e', '#317dc9', '#1d2222'];
+function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)); }
+function freshSeed(): ShotSeed { return { balls: structuredClone(base.balls), angle: base.angle, speed: base.power, side: base.side ?? 0, top: base.top ?? 0 }; }
+function inform(message: string) { toast.textContent = message; toast.classList.add('show'); window.clearTimeout(toastTimer); toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1900); }
+function ballColor(id: number) { return ballColors[id % ballColors.length]; }
+function selectedDrill() { return zhongbaDrills.find(drill => drill.id === drillSelect.value) ?? zhongbaDrills[0]; }
+function renderDrillCard(drill = selectedDrill(), result = '') {
+  el('drillCard').innerHTML = `<h3>${drill.title}</h3><p class="difficulty">${'★'.repeat(drill.difficulty)}${'☆'.repeat(5 - drill.difficulty)} · 难度 ${drill.difficulty}/5</p><p><strong>目标</strong> ${drill.objective}</p><p><strong>建议杆法</strong> ${drill.suggestedCue}</p><p class="drill-result">${result}</p>`;
+}
+function updateDrillSummary(result?: string) {
+  el('modeTitle').textContent = activeDrill ? activeDrill.title : '自由练习';
+  el('drillSummary').textContent = activeDrill ? (result ?? `难度 ${activeDrill.difficulty}/5 · ${activeDrill.objective}`) : '选择球型练习开始训练';
+  const retry = el<HTMLButtonElement>('retry'); retry.title = activeDrill ? '重打本题' : '重打'; retry.setAttribute('aria-label', activeDrill ? '重打本题' : '重打本杆');
+  const next = el<HTMLButtonElement>('nextDrillToolbar'); next.disabled = !activeDrill; next.title = activeDrill ? '下一题' : '先选择训练题';
+}
+function updatePocketTray() { const tray = el('pocketTray'); tray.replaceChildren(); for (const id of pocketed.slice(0, 8)) { const chip = document.createElement('span'); chip.className = 'ball-chip'; chip.textContent = String(id); chip.style.background = ballColor(id); tray.append(chip); } if (pocketed.length > 8) { const more = document.createElement('span'); more.className = 'ball-more'; more.textContent = `+${pocketed.length - 8}`; tray.append(more); } }
+function updateEnabled() {
+  for (const id of ['guideline', 'preset', 'shoot', 'retry', 'reset', 'spinOpen', 'elevationOpen']) el<HTMLButtonElement>(id).disabled = running;
+  el<HTMLButtonElement>('nextDrillToolbar').disabled = running || !activeDrill;
+  for (const control of [fineAim, powerControl]) {
+    control.setAttribute('aria-disabled', String(running));
+    control.parentElement?.classList.toggle('is-disabled', running);
+  }
+}
+function updatePreview() { try { prediction = simulateShot(seed); sim = new Simulator(structuredClone(seed)); render(); updateEnabled(); } catch { inform('球位重叠或越界，请重新摆球。'); } }
+function applyLayout() { running = false; activeDrill = undefined; base = structuredClone(layouts[layoutEl.value]); seed = freshSeed(); pocketed = []; updatePocketTray(); updateDrillSummary(); updateControls(); updatePreview(); inform('已载入球型，可以拖动瞄准或摆球。'); }
+function loadDrill(drill = selectedDrill()) { running = false; activeDrill = drill; base = { name: drill.title, balls: structuredClone(drill.seed.balls), angle: drill.seed.angle, power: drill.seed.speed, side: drill.seed.side, top: drill.seed.top }; seed = structuredClone(drill.seed); pocketed = []; updatePocketTray(); updateDrillSummary(); updateControls(); updatePreview(); el<HTMLDialogElement>('presetDialog').close(); inform(`已载入训练题：${drill.title}`); }
+function updateControls() { const power = clamp((seed.speed - .2) / 4.3, 0, 1); el<HTMLOutputElement>('powerValue').value = `${Math.round(power * 100)}%`; el('powerFill').style.height = `${power * 100}%`; el('powerKnob').style.bottom = `calc(${power * 100}% - 19px)`; const a = ((seed.angle + 180) % 360) - 180; el<HTMLOutputElement>('aimValue').value = `${Math.round(a)}°`; el('fineThumb').style.top = `calc(${50 - a / 360 * 85}% - 19px)`; el('fineTicks').style.transform = `translateY(${a * .85}px)`; tipDot.style.left = `${50 + seed.side / .45 * 40}%`; tipDot.style.top = `${50 - seed.top / .45 * 40}%`; el<HTMLOutputElement>('elevationValue').value = `${Math.round(elevation)}°`; }
+function ball(px: number, py: number, radius: number, color: string) { ctx.beginPath(); ctx.arc(x(px), y(py), radius * scale, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); ctx.strokeStyle = '#ffffff66'; ctx.lineWidth = 1; ctx.stroke(); }
+function drawPath(run: SimulationRun) { for (let ballId = 0; ballId < seed.balls.length; ballId++) { ctx.beginPath(); ctx.setLineDash([5, 7]); ctx.strokeStyle = ballId ? '#ffcd4a' : '#e7ffff'; ctx.globalAlpha = .78; for (const [index, frame] of run.frames.entries()) { const sample = frame.balls[ballId]; if (sample.state === 'Falling' || sample.state === 'InPocket') break; if (index === 0) ctx.moveTo(x(sample.pos[0]), y(sample.pos[1])); else ctx.lineTo(x(sample.pos[0]), y(sample.pos[1])); } ctx.stroke(); } ctx.setLineDash([]); ctx.globalAlpha = 1; }
+function render() { ctx.clearRect(0, 0, canvas.width, canvas.height); const felt = ctx.createLinearGradient(0, 0, canvas.width, canvas.height); felt.addColorStop(0, '#0b8157'); felt.addColorStop(1, '#035139'); ctx.fillStyle = felt; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.strokeStyle = '#70b494'; ctx.lineWidth = 3; ctx.strokeRect(x(-config.width / 2 + config.radius), y(config.height / 2 - config.radius), config.width * scale - 2 * config.radius * scale, config.height * scale - 2 * config.radius * scale); for (const pocket of geometry.pockets) ball(pocket.pos.x, pocket.pos.y, pocket.radius, '#071211'); for (const jaw of geometry.jaws) ball(jaw.pos.x, jaw.pos.y, jaw.radius, '#3c8d77'); if (prediction && !running && showGuideline) drawPath(prediction); const snapshot = sim?.snapshot() ?? []; for (const sample of snapshot) { if (sample.state === 'InPocket') continue; ball(sample.pos[0], sample.pos[1], config.radius, ballColor(sample.id)); if (sample.id) { ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(sample.id), x(sample.pos[0]), y(sample.pos[1]) + 1); } } if (!running && sim && showGuideline) { const cue = sim.snapshot()[0], angle = seed.angle * Math.PI / 180; ctx.beginPath(); ctx.setLineDash([10, 8]); ctx.strokeStyle = '#d7ffed'; ctx.moveTo(x(cue.pos[0]), y(cue.pos[1])); ctx.lineTo(x(cue.pos[0] + Math.cos(angle) * .35), y(cue.pos[1] + Math.sin(angle) * .35)); ctx.stroke(); ctx.setLineDash([]); } }
+function drillSucceeded(drill: PracticeDrill, outcome: ReturnType<typeof analyzeShot>) {
+  const events = sim!.events;
+  const cueContact = events.findIndex(event => event.type === 'collision' && (event.ball === 0 || event.other === 0));
+  if (outcome.cuePotted) return false;
+  if (drill.kind === 'standard-break') return cueContact >= 0;
+  if (drill.kind === 'one-cushion') { const rail = events.findIndex(event => event.type === 'rail' && event.ball === 0); return rail >= 0 && cueContact >= 0 && rail < cueContact; }
+  return outcome.potted.includes(1);
+}
+function finishShot() { running = false; const outcome = analyzeShot({ frames: [], events: sim!.events, ticks: sim!.tick }); pocketed = outcome.potted.filter(id => id > 0); updatePocketTray(); updateEnabled(); render(); const summary = outcome.cuePotted ? '母球落袋，本杆失误。' : pocketed.length ? `进球：${pocketed.map(id => `球${id}`).join('、')}。` : '本杆未进球。'; if (activeDrill) { const success = drillSucceeded(activeDrill, outcome); const result = success ? '目标达成 ✓ 可以进入下一题。' : '本题未达成，可重打本题调整杆法。'; renderDrillCard(activeDrill, result); updateDrillSummary(result); inform(result); } else inform(`${summary} 碰库 ${outcome.cushions} 次。`); }
+function startShot() { if (!guard()) return; sim = new Simulator(structuredClone(seed)); running = true; elapsed = 0; last = performance.now(); updateEnabled(); inform('正在依据预演的同一模拟器推进实球…'); }
+function animate(now: number) { if (running && sim) { elapsed += Math.min((now - last) / 1000, .1); last = now; try { while (elapsed >= config.dt && !sim.done) { sim.step(); elapsed -= config.dt; } render(); if (sim.done) finishShot(); } catch { running = false; updateEnabled(); inform('模拟被中止：数值检查失败。'); } } requestAnimationFrame(animate); }
+function pointerToWorld(event: PointerEvent) { const p = fromCanvas(event); return { x: clamp((p.x - canvas.width / 2) / scale, -config.width / 2 + config.radius, config.width / 2 - config.radius), y: clamp((canvas.height / 2 - p.y) / scale, -config.height / 2 + config.radius, config.height / 2 - config.radius) }; }
+function setAim(point: BallSeed) { const cue = seed.balls[0]; seed.angle = Math.atan2(point.y - cue.y, point.x - cue.x) * 180 / Math.PI; updateControls(); updatePreview(); }
+function guard() { if (running) { inform('球在运动中，等待本杆结束。'); return false; } return true; }
+canvas.addEventListener('pointerdown', event => { if (!guard()) return; canvas.setPointerCapture(event.pointerId); const point = pointerToWorld(event), hit = seed.balls.findIndex(ball => Math.hypot(ball.x - point.x, ball.y - point.y) < config.radius * 1.5); if (base.free && hit >= 0) draggingBall = hit; else { aiming = true; setAim(point); } });
+canvas.addEventListener('pointermove', event => { if (running) return; const point = pointerToWorld(event); if (draggingBall !== undefined) { const collides = seed.balls.some((ball, index) => index !== draggingBall && Math.hypot(ball.x - point.x, ball.y - point.y) < 2 * config.radius); if (!collides) { seed.balls[draggingBall] = point; updatePreview(); } } else if (aiming) setAim(point); });
+canvas.addEventListener('pointerup', event => { draggingBall = undefined; aiming = false; if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId); });
+function bindVertical(id: string, callback: (ratio: number) => void, release?: () => void) { const target = el(id); const read = (event: PointerEvent) => { const rect = target.getBoundingClientRect(); callback(clamp(1 - (event.clientY - rect.top) / rect.height, 0, 1)); }; target.addEventListener('pointerdown', event => { if (!guard()) return; target.setPointerCapture(event.pointerId); read(event); }); target.addEventListener('pointermove', event => { if (target.hasPointerCapture(event.pointerId)) read(event); }); target.addEventListener('pointerup', event => { if (target.hasPointerCapture(event.pointerId)) { target.releasePointerCapture(event.pointerId); release?.(); } }); }
+bindVertical('powerControl', ratio => { seed.speed = .2 + ratio * 4.3; updateControls(); updatePreview(); }, startShot); bindVertical('fineAim', ratio => { seed.angle = (1 - ratio) * 360 - 180; updateControls(); updatePreview(); });
+fineAim.addEventListener('keydown', event => { if (!guard() || !['ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) return; event.preventDefault(); seed.angle = event.key === 'Home' ? 0 : seed.angle + (event.key === 'ArrowUp' ? -1 : 1); updateControls(); updatePreview(); }); powerControl.addEventListener('keydown', event => { if (!guard() || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); seed.speed = event.key === 'Home' ? .2 : event.key === 'End' ? 4.5 : clamp(seed.speed + (event.key === 'ArrowUp' ? .1 : -.1), .2, 4.5); updateControls(); updatePreview(); });
+function setTip(event: PointerEvent) { const rect = tip.getBoundingClientRect(); let side = ((event.clientX - rect.left) / rect.width - .5) / .4, top = (.5 - (event.clientY - rect.top) / rect.height) / .4; const magnitude = Math.hypot(side, top); if (magnitude > .45) { side *= .45 / magnitude; top *= .45 / magnitude; } seed.side = side; seed.top = top; updateControls(); updatePreview(); }
+tip.addEventListener('pointerdown', event => { if (!guard()) return; tip.setPointerCapture(event.pointerId); setTip(event); }); tip.addEventListener('pointermove', event => { if (tip.hasPointerCapture(event.pointerId)) setTip(event); }); tip.addEventListener('pointerup', event => { if (tip.hasPointerCapture(event.pointerId)) tip.releasePointerCapture(event.pointerId); });
+function openDialog(id: string) { if (guard()) el<HTMLDialogElement>(id).showModal(); }
+el('spinOpen').onclick = () => openDialog('spinDialog'); el('elevationOpen').onclick = () => openDialog('elevationDialog'); el('preset').onclick = () => { renderDrillCard(); openDialog('presetDialog'); }; el('settings').onclick = () => openDialog('helpDialog'); document.querySelectorAll<HTMLButtonElement>('[data-close]').forEach(button => button.onclick = () => el<HTMLDialogElement>(button.dataset.close!).close());
+el('spinReset').onclick = () => { seed.side = 0; seed.top = 0; updateControls(); updatePreview(); }; const elevationEl = el<HTMLInputElement>('elevation'); elevationEl.oninput = () => { elevation = Number(elevationEl.value); updateControls(); }; el('elevationReset').onclick = () => { elevation = 0; elevationEl.value = '0'; updateControls(); };
+function advanceDrill(load = false) { const index = zhongbaDrills.findIndex(drill => drill.id === (activeDrill?.id ?? drillSelect.value)); drillSelect.value = zhongbaDrills[(index + 1) % zhongbaDrills.length].id; if (load) loadDrill(selectedDrill()); else renderDrillCard(); }
+layoutEl.onchange = applyLayout; drillSelect.onchange = () => renderDrillCard(); el('loadDrill').onclick = () => loadDrill(); el('nextDrill').onclick = () => advanceDrill(); el('nextDrillToolbar').onclick = () => { if (guard() && activeDrill) advanceDrill(true); }; el('guideline').onclick = () => { if (!guard()) return; showGuideline = !showGuideline; el<HTMLButtonElement>('guideline').setAttribute('aria-pressed', String(showGuideline)); render(); }; el('shoot').onclick = startShot; el('retry').onclick = () => { if (!guard()) return; if (activeDrill) seed = structuredClone(activeDrill.seed); pocketed = []; updatePocketTray(); updateDrillSummary(); updateControls(); updatePreview(); inform(activeDrill ? '已恢复到本题初始球局。' : '已恢复到出杆前的当前球局。'); }; el('reset').onclick = () => { if (guard()) activeDrill ? loadDrill(activeDrill) : applyLayout(); }; el('back').onclick = () => inform('练习首页尚未接入路由。');
+applyLayout(); requestAnimationFrame(animate);
