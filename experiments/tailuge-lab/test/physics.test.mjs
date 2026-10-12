@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulator, predict, simulateShot, analyzeShot, scenarios, config } from '../dist/simulator.mjs';
+import { initialChineseEightBallProfile, joyCompetitionInitialProfile } from '../dist/calibration-scenarios.mjs';
+import { calibrationScenarios, runCalibrationScenario } from '../dist/calibration-scenarios.mjs';
 for (const [key, {seed}] of Object.entries(scenarios)) test(`${key}: finite, settles, prediction equals separately stepped playback at every sample`, () => {
   const result = predict(seed), sim = new Simulator(structuredClone(seed));
   for (const frame of result.frames) { while (sim.tick < frame.tick) sim.step(); assert.deepEqual(sim.snapshot(), frame.balls); }
@@ -39,4 +41,22 @@ test('public question-bank interface produces a replayable outcome', () => {
   assert.deepEqual(outcome.potted, [...new Set(run.events.filter(event => event.type === 'pot').map(event => event.ball))]);
   assert.ok(outcome.duration > 0);
   assert.deepEqual(simulateShot(input, 25), run);
+});
+test('five calibration categories have repeatable baseline assertions', () => {
+  assert.deepEqual([...new Set(calibrationScenarios.map(scenario => scenario.category))], ['straight-roll', 'head-on', 'thin-cut', 'one-cushion', 'pocketing']);
+  for (const scenario of calibrationScenarios) assert.doesNotThrow(() => runCalibrationScenario(scenario));
+});
+test('an injected calibration profile keeps preview and live stepping strictly identical', () => {
+  const profile = structuredClone(initialChineseEightBallProfile);
+  profile.id = 'test-high-rolling-friction'; profile.cloth.rollingFriction = .011;
+  const seed = structuredClone(scenarios.collision.seed), run = simulateShot(seed, 10, profile), live = new Simulator(seed, profile);
+  for (const frame of run.frames) { while (live.tick < frame.tick) live.step(); assert.deepEqual(live.snapshot(), frame.balls); }
+  assert.deepEqual(live.events, run.events);
+  assert.notEqual(run.ticks, simulateShot(seed, 10, initialChineseEightBallProfile).ticks);
+});
+test('user-provided competition pocket measurements remain distinct and serializable', () => {
+  const pocket = joyCompetitionInitialProfile.pockets.measurements;
+  assert.deepEqual([pocket.railLipOpening, pocket.cornerClearPassage, pocket.middleClearPassage], [.085, .105, .120]);
+  assert.equal(pocket.tolerance, .001);
+  assert.equal(JSON.parse(JSON.stringify(joyCompetitionInitialProfile)).source.kind, 'user-provided-initial');
 });

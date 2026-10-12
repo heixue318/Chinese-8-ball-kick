@@ -5,17 +5,18 @@ import { Cushion } from '../vendor/tailuge/model/physics/cushion';
 import { Knuckle } from '../vendor/tailuge/model/physics/knuckle';
 import { Pocket } from '../vendor/tailuge/model/physics/pocket';
 import { cueStrike, mathavanAdapter, surfaceVelocityFull } from '../vendor/tailuge/model/physics/physics';
-import { R, setR, setm, setmu, setmuS } from '../vendor/tailuge/model/physics/constants';
+import { R } from '../vendor/tailuge/model/physics/constants';
 import { TableGeometry } from '../vendor/tailuge/view/tablegeometry';
 import { PocketGeometry } from '../vendor/tailuge/view/pocketgeometry';
+import { applyCalibrationProfile, initialChineseEightBallProfile, type CalibrationProfile } from './calibration';
 
-// One immutable configuration per JS realm: upstream constants/geometries are global.
-export const config = Object.freeze({ width: 2.54, height: 1.27, radius: 0.028575, mass: 0.17, dt: 1 / 1000, maxSeconds: 40, rolling: 0.007, sliding: 0.126 });
-setR(config.radius); setm(config.mass); setmu(config.rolling); setmuS(config.sliding);
-TableGeometry.X = config.width / 2; TableGeometry.Y = config.height / 2;
-TableGeometry.tableX = TableGeometry.X - R; TableGeometry.tableY = TableGeometry.Y - R;
-PocketGeometry.scaleToRadius(R);
-export const geometry = { pockets: PocketGeometry.pocketCenters, jaws: PocketGeometry.knuckles };
+// Tailuge stores constants at module scope; profiles are reapplied for every simulator step.
+applyCalibrationProfile(initialChineseEightBallProfile);
+export const config = Object.freeze({ width: initialChineseEightBallProfile.table.playingLength, height: initialChineseEightBallProfile.table.playingWidth, radius: initialChineseEightBallProfile.ball.radius, mass: initialChineseEightBallProfile.ball.mass, dt: initialChineseEightBallProfile.simulation.dt, maxSeconds: initialChineseEightBallProfile.simulation.maxSeconds, rolling: initialChineseEightBallProfile.cloth.rollingFriction, sliding: initialChineseEightBallProfile.cloth.slidingFriction });
+export const geometry = {
+  get pockets() { return PocketGeometry.pocketCenters; },
+  get jaws() { return PocketGeometry.knuckles; },
+};
 /** Platform-neutral shot contract. Future question banks should persist this shape. */
 export type BallSeed = { x: number; y: number };
 export type ShotInput = { angle: number; speed: number; side: number; top: number };
@@ -39,7 +40,8 @@ export const scenarios: Record<string, { name: string; seed: Seed }> = {
 };
 export class Simulator {
   balls: Ball[]; tick = 0; events: PhysicsEvent[] = [];
-  constructor(public seed: ShotSeed) {
+  constructor(public seed: ShotSeed, public readonly profile: CalibrationProfile = initialChineseEightBallProfile) {
+    applyCalibrationProfile(profile);
     if (!seed.balls.length || seed.balls.length > 16 || ![seed.angle, seed.speed, seed.side, seed.top].every(Number.isFinite) || seed.speed < 0 || seed.speed > 5 || Math.hypot(seed.side, seed.top) > 0.451) throw new Error('Invalid shot');
     this.balls = seed.balls.map((p, index) => {
       if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > TableGeometry.tableX || Math.abs(p.y) > TableGeometry.tableY) throw new Error('Ball outside table');
@@ -53,9 +55,10 @@ export class Simulator {
   }
   get done() { return this.balls.every(b => !b.inMotion()); }
   step() {
+    applyCalibrationProfile(this.profile);
     if (this.done) return;
-    if (this.tick >= config.maxSeconds / config.dt) throw new Error('Simulation time limit exceeded');
-    const dt = config.dt;
+    if (this.tick >= this.profile.simulation.maxSeconds / this.profile.simulation.dt) throw new Error('Simulation time limit exceeded');
+    const dt = this.profile.simulation.dt;
     // Upstream contact formulas; bounded fixed-step scheduler with separating-contact guards.
     for (let i = 0; i < this.balls.length; i++) for (let j = i + 1; j < this.balls.length; j++) {
       const a = this.balls[i], b = this.balls[j];
@@ -87,8 +90,8 @@ export class Simulator {
   snapshot(): BallSnapshot[] { return this.balls.map(b => ({ id: b.id, pos: b.pos.toArray(), vel: b.vel.toArray(), spin: b.rvel.toArray(), state: b.state, slip: surfaceVelocityFull(b.vel, b.rvel).length() })); }
 }
 /** Runs a complete shot. Both UI preview and real-time animation use this exact solver. */
-export function simulateShot(seed: ShotSeed, stride = 10): SimulationRun {
-  const sim = new Simulator(structuredClone(seed)); const frames = [{ tick: 0, balls: sim.snapshot() }];
+export function simulateShot(seed: ShotSeed, stride = 10, profile: CalibrationProfile = initialChineseEightBallProfile): SimulationRun {
+  const sim = new Simulator(structuredClone(seed), profile); const frames = [{ tick: 0, balls: sim.snapshot() }];
   while (!sim.done) { sim.step(); if (sim.tick % stride === 0 || sim.done) frames.push({ tick: sim.tick, balls: sim.snapshot() }); }
   return { frames, events: sim.events, ticks: sim.tick };
 }

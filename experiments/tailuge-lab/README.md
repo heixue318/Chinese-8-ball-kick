@@ -37,6 +37,12 @@ pnpm start
 - 固定步长得到可重复结果，但仍是数值近似；没有模拟跳球、扎杆、杆头打滑或球台制造差异。示例场景用于验证计算链路，不能证明对实台落点的绝对精度。
 - 上游使用 GPL-3.0 许可证，副本在 `vendor/tailuge/LICENSE`。若把这份源码或其衍生物编入正式分发应用，须先完成 GPL 合规评估；目前把它留在独立实验目录，避免无意影响 Android 发布包。
 
+## 实台标定基础设施
+
+`src/calibration.ts` 的 `CalibrationProfile` 是完整可序列化配置，明确采用 SI 单位与来源；默认 `initialChineseEightBallProfile` 是“中式八球 9 尺初值”，不是实测结果。另有用户提供的 `joyCompetitionInitialProfile`，存档了赛事级乔氏参数与三种不同袋口测量定义，但尚未完成实台拟合，也未把它们错误地折算为同一半径。传入 `simulateShot(seed, stride, profile)` 和 `new Simulator(seed, profile)` 后，预演与实时推进都会使用该 profile。详见 [实台标定记录](docs/calibration.md) 和 [测量记录模板](docs/calibration-measurement-template.csv)。
+
+Tailuge 的常量属于模块级状态。`Simulator` 会在构造与每次 `step()` 前重应用自己的 profile，因此同一 JS realm 内交替推进不同 profile 时仍可复现；不要把不同 profile 的模拟放到真正并行的 worker/线程中并共享状态。
+
 ## 集成建议
 
 1. 用现场球台数据标定袋口、库胶反弹、台呢滑动/滚动摩擦和球重，建立实拍与模拟落点对照集。

@@ -1,0 +1,7 @@
+scenario_id,table_id,profile_id,run_id,video_file,video_fps,shot_speed_mps,shot_angle_deg,side_offset_radius,vertical_offset_radius,observed_distance_m,observed_target_speed_mps,observed_target_angle_deg,first_cushion_x_m,first_cushion_y_m,potted,notes
+straight-roll-distance,replace-me,cn8-9ft-initial-v1,001,replace-me.mp4,240,0.30,0,0,0,replace-me,,,,,,
+head-on-collision,replace-me,cn8-9ft-initial-v1,002,replace-me.mp4,240,1.80,0,0,0,,replace-me,0,,,,
+thin-cut,replace-me,cn8-9ft-initial-v1,003,replace-me.mp4,240,1.65,5.4,0,0,,replace-me,replace-me,,,,
+one-cushion,replace-me,cn8-9ft-initial-v1,004,replace-me.mp4,240,0.80,26,0,0,,,replace-me,replace-me,replace-me,false,
+center-pocket,replace-me,cn8-9ft-initial-v1,005,replace-me.mp4,240,1.00,90,0,0,,,,,,true,
+bottom-pocket,replace-me,cn8-9ft-initial-v1,006,replace-me.mp4,240,1.00,-138,0,0,,,,,,true,
